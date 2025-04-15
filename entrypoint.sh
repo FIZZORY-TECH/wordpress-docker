@@ -80,10 +80,8 @@ fi
 
 # Install performance plugins
 echo "Installing performance plugins..."
-wp_wrapper plugin install wp-super-cache --activate --allow-root || echo "Failed to install WP Super Cache"
 wp_wrapper plugin install query-monitor --allow-root || echo "Failed to install Query Monitor" # Install but don't activate
 wp_wrapper plugin install redis-cache --activate --allow-root || echo "Failed to install/activate Redis Cache" # Install and activate
-wp_wrapper plugin install wp-optimize --activate --allow-root || echo "Failed to install WP-Optimize"
 
 # Configure WordPress for better performance
 echo "Configuring WordPress for better performance..."
