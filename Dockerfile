@@ -1,13 +1,16 @@
 FROM wordpress:latest
 
 # Install dependencies
-RUN apt-get update && apt-get install -y \
+# Install dependencies & clean up
+RUN apt-get update && apt-get install -y --no-install-recommends \
     default-mysql-client \
     less \
     wget \
     nano \
     zip \
-    unzip
+    unzip \
+    # libmemcached-tools was here, removed as memcached is removed
+    && rm -rf /var/lib/apt/lists/*
 
 # Install WP-CLI
 RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar \
@@ -25,35 +28,29 @@ RUN { \
     echo 'opcache.memory_consumption=256'; \
     echo 'opcache.interned_strings_buffer=16'; \
     echo 'opcache.max_accelerated_files=10000'; \
-    echo 'opcache.revalidate_freq=0'; \
+    # Set to 2 for development, 0 for production
+    echo 'opcache.revalidate_freq=2'; \
     echo 'opcache.fast_shutdown=1'; \
     echo 'opcache.enable_cli=1'; \
     echo 'realpath_cache_size=4096K'; \
     echo 'realpath_cache_ttl=600'; \
     } > /usr/local/etc/php/conf.d/wordpress-performance.ini
 
-# Install additional performance tools
-RUN apt-get update && apt-get install -y \
-    memcached \
-    libmemcached-tools \
-    && docker-php-ext-install opcache
+# Install PHP extensions
+RUN docker-php-ext-install opcache
+RUN pecl install redis \
+    && docker-php-ext-enable redis
 
 # Create uploads directory with proper permissions
 RUN mkdir -p /var/www/html/wp-content/uploads && \
     chown -R www-data:www-data /var/www/html
 
-# Create permissions fix script
-RUN echo '#!/bin/bash \n\
-find /var/www/html/wp-content -type d -exec chmod 755 {} \; \n\
-find /var/www/html/wp-content -type f -exec chmod 644 {} \; \n\
-chown -R www-data:www-data /var/www/html/wp-content/uploads \n\
-' > /usr/local/bin/fix-permissions.sh && \
-chmod +x /usr/local/bin/fix-permissions.sh
+# Removed redundant permissions fix script creation (handled in entrypoint)
 
 # Copy custom entrypoint script and zips
 COPY entrypoint.sh /usr/local/bin/custom-entrypoint.sh
+COPY presets/* /usr/local/bin/presets/
 RUN chmod +x /usr/local/bin/custom-entrypoint.sh
-COPY ./zips /app_zips
 
 # Set working directory
 WORKDIR /var/www/html

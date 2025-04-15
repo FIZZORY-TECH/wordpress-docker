@@ -7,12 +7,7 @@ DB_USER=${WORDPRESS_DB_USER}
 DB_PASSWORD=${WORDPRESS_DB_PASSWORD}
 DB_NAME=${WORDPRESS_DB_NAME}
 
-# Fix permissions for WordPress directories
-echo "Setting up proper permissions..."
-mkdir -p /var/www/html/wp-content/uploads/2025/03
-mkdir -p /var/www/html/wp-content/upgrade
-chmod -R 775 /var/www/html/wp-content
-chown -R www-data:www-data /var/www/html/wp-content
+# Initial permission setup removed, will be handled comprehensively later
 
 echo "Waiting for database connection to $DB_HOST..."
 # Wait for the database to be ready
@@ -45,77 +40,70 @@ sleep 5
 echo "Adding performance optimizations to wp-config.php..."
 if [ -f /var/www/html/wp-config.php ]; then
   # Check if optimizations are already added
-  if ! grep -q "WP_MEMORY_LIMIT" /var/www/html/wp-config.php; then
-    sed -i "/\/\* That's all, stop editing\! Happy publishing. \*\//i \
-/** Performance optimizations **/\n\
-define('WP_MEMORY_LIMIT', '1024M');\n\
-define('WP_MAX_MEMORY_LIMIT', '2048M');\n\
+  # Check if standard optimizations are already added
+  if ! grep -q "WP_CACHE" /var/www/html/wp-config.php; then
+      sed -i "/\/\* That's all, stop editing\! Happy publishing. \*\//i \
+/** WordPress Cache **/\n\
 define('WP_CACHE', true);\n\
-define('COMPRESS_CSS', true);\n\
-define('COMPRESS_SCRIPTS', true);\n\
-define('CONCATENATE_SCRIPTS', true);\n\
-define('ENFORCE_GZIP', true);\n\
-define('DISABLE_WP_CRON', true);\n\
+\n\
+/** WordPress Performance & Security **/\n\
 define('WP_POST_REVISIONS', 5);\n\
 define('EMPTY_TRASH_DAYS', 7);\n\
 define('AUTOSAVE_INTERVAL', 300);\n\
-define('DISALLOW_FILE_EDIT', false);\n\
+define('DISALLOW_FILE_EDIT', true);\n\
+\n\
+/** Redis Cache Configuration **/\n\
+define('WP_REDIS_HOST', 'redis');\n\
+define('WP_REDIS_PORT', 6379);\n\
+# define('WP_REDIS_PASSWORD', 'your-redis-password'); # Uncomment if Redis requires auth\n\
+define('WP_REDIS_TIMEOUT', 1);\n\
+define('WP_REDIS_READ_TIMEOUT', 1);\n\
+define('WP_REDIS_DATABASE', 0); # Usually 0\n\
 " /var/www/html/wp-config.php
   fi
 fi
+
+# Create a wrapper function for wp-cli to suppress OPcache warnings
+wp_wrapper() {
+    php -d opcache.enable=0 /usr/local/bin/wp "$@"
+}
 
 # Now run the wp-cli commands
 echo "Setting up WordPress with wp-cli..."
 
 # Check if WordPress is installed
 echo "Checking if WordPress is installed..."
-if ! wp core is-installed --allow-root 2>/dev/null; then
+if ! wp_wrapper core is-installed --allow-root 2>/dev/null; then
     echo "Installing WordPress..."
-    wp core install --url="http://localhost:8000" --title="My WordPress Site" --admin_user="admin" --admin_password="password" --admin_email="admin@example.com" --allow-root
+    wp_wrapper core install --url="http://localhost:8000" --title="My WordPress Site" --admin_user="admin" --admin_password="password" --admin_email="admin@example.com" --allow-root
 fi
-
-# # Install Divi theme
-# echo "Installing Divi theme..."
-# wp theme install /zips/divi.zip --activate --allow-root || echo "Failed to install Divi theme"
-
-# # Install Divi Plus plugin
-# echo "Installing Divi Plus plugin..."
-# wp plugin install /zips/divi-plus.zip --activate --allow-root || echo "Failed to install Divi Plus plugin"
-
-# Install WooCommerce plugin
-# echo "Installing WooCommerce plugin..."
-# wp plugin install woocommerce --activate --allow-root || echo "Failed to install WooCommerce plugin"
 
 # Install performance plugins
 echo "Installing performance plugins..."
-wp plugin install wp-super-cache --activate --allow-root || echo "Failed to install WP Super Cache"
-wp plugin install query-monitor --activate --allow-root || echo "Failed to install Query Monitor"
-wp plugin install redis-cache --allow-root || echo "Failed to install Redis Cache"
-wp plugin install wp-optimize --activate --allow-root || echo "Failed to install WP-Optimize"
+wp_wrapper plugin install wp-super-cache --activate --allow-root || echo "Failed to install WP Super Cache"
+wp_wrapper plugin install query-monitor --allow-root || echo "Failed to install Query Monitor" # Install but don't activate
+wp_wrapper plugin install redis-cache --activate --allow-root || echo "Failed to install/activate Redis Cache" # Install and activate
+wp_wrapper plugin install wp-optimize --activate --allow-root || echo "Failed to install WP-Optimize"
 
 # Configure WordPress for better performance
 echo "Configuring WordPress for better performance..."
-wp option update blog_public 0 --allow-root || echo "Failed to set blog_public"
-wp option update permalink_structure '/%postname%/' --allow-root || echo "Failed to set permalink structure"
-wp rewrite flush --allow-root || echo "Failed to flush rewrite rules"
+wp_wrapper option update blog_public 0 --allow-root || echo "Failed to set blog_public"
+wp_wrapper option update permalink_structure '/%postname%/' --allow-root || echo "Failed to set permalink structure"
+wp_wrapper rewrite flush --allow-root || echo "Failed to flush rewrite rules"
 
-# Final permission fix
-echo "Final permission fixes..."
-# Set proper permissions for all WordPress content
-chmod -R 775 /var/www/html/wp-content
-chown -R www-data:www-data /var/www/html/wp-content
-
-# Ensure specific directories have correct permissions
-chmod -R 775 /var/www/html/wp-content/uploads
-chmod -R 775 /var/www/html/wp-content/upgrade
-chmod -R 775 /var/www/html/wp-content/plugins
-chmod -R 775 /var/www/html/wp-content/themes
-
-# Make sure WordPress can write to these directories
-chown -R www-data:www-data /var/www/html/wp-content/uploads
-chown -R www-data:www-data /var/www/html/wp-content/upgrade
-chown -R www-data:www-data /var/www/html/wp-content/plugins
-chown -R www-data:www-data /var/www/html/wp-content/themes
+# Final permission fix using find for better precision
+echo "Applying final permissions..."
+# Ensure wp-content exists before attempting to set permissions
+if [ -d "/var/www/html/wp-content" ]; then
+    # Set directory permissions to 755
+    find /var/www/html/wp-content -type d -exec chmod 755 {} \;
+    # Set file permissions to 644
+    find /var/www/html/wp-content -type f -exec chmod 644 {} \;
+    # Set ownership to www-data
+    chown -R www-data:www-data /var/www/html/wp-content
+else
+    echo "Warning: /var/www/html/wp-content directory not found. Skipping final permission fix."
+fi
 
 # Start the WordPress server
 echo "Starting Apache..."

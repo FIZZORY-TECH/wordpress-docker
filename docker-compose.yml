@@ -11,7 +11,7 @@ services:
       MYSQL_USER: wordpress
       MYSQL_PASSWORD: wordpress
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "wordpress", "-pwordpress"]
       timeout: 5s
       retries: 10
     # Improve MySQL performance
@@ -41,21 +41,21 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started # Or service_healthy if using a redis image with healthcheck
     ports:
       - "8000:80"
     volumes:
       # Use a named volume for wp-content for better performance
       - wp_content_data:/var/www/html/wp-content
+      # Mount a local directory for theme/plugin zips needed by presets
+      - ./zips:/zips:ro # Mount read-only
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_USER: wordpress
       WORDPRESS_DB_PASSWORD: wordpress
       WORDPRESS_DB_NAME: wordpress
-      # PHP performance improvements
-      PHP_MEMORY_LIMIT: 1024M
-      PHP_MAX_EXECUTION_TIME: 600
-      PHP_UPLOAD_MAX_FILESIZE: 128M
-      PHP_POST_MAX_SIZE: 128M
+      # PHP settings are now managed in php.ini via Dockerfile
     # Grant proper permissions on startup
     user: "root"
     # Resource allocation
@@ -68,6 +68,18 @@ services:
           cpus: '1'
           memory: 1G
 
+  redis:
+    image: redis:alpine
+    restart: always
+    # Optional: Add resource limits if needed
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 256M
+    #     reservations:
+    #       memory: 128M
+
 volumes:
   db_data:
   wp_content_data: # Define the named volume for wp-content
+  redis_data: # Optional: Persist Redis data
